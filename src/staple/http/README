@@ -1,0 +1,72 @@
+The staple/libstaple/http directory contains code to parse HTTP
+traffic. This file contains an overview of the code structure in
+staple/libstaple/http. For documentation on the format of the log
+files produced by the HTTP code see staple/README.
+
+
+The entry class for the HTTP parsing is HTTPEngine. The main entry
+method is HTTPEngine::processPacket(const TCPPacket& packet).
+
+This method receives packets from the Parser class. The HTTPEngine
+maintains a map IPAddress -> HTTPUser. Each HTTPUser represents one
+client terminal and they are indexed by their IP address.
+
+The HTTPUser maintains a map TCPConnId -> HTTPConnection to keep track
+of all the TCP connections made by that HTTPUser.
+
+Given a TCPPacket p the call chain is typically as follows:
+
+HTTPEngine::processPacket ->
+    HTTPUser::processPacket ->
+        HTTPConnecion::processPacket ->
+
+	    Here the PacketBuffer class is used to deal with reordered
+            and duplicated packets. After this point it is assumed
+            that there are no duplicate or missing packets. If too
+            many packets are reordered or missing then the connection
+            is dropped and any further packets on that connection are ignored.
+
+            For uplink packets (p.direction == 0):
+            HTTPMsg::processReqPacket ->
+                HTTPMsg::processRequest
+                    Parse the request and store interesting headers
+                    and other information in the HTTPMsg object.
+
+
+            For downlink packets (p.direction == 1):
+            HTTPMsg::processRspPacket ->
+                HTTPMsg::processResponse
+                    Parse the response and store interesting headers
+                    and other information in the HTTPMsg object.
+
+        When a HTTPMsg is fully parsed the object is passed to
+        HTTPConnection::consumeMessage which in turn calls
+        HTTPUser::associateWithPageView on the appropriate HTTPUser
+        object.
+
+
+HTTPUser::associateWithPageView is responsible for taking all the
+HTTPMsg objects and grouping them according to the page they belong
+to. The result is a Resource object.
+
+A Resource object is conceptually simple, it consist of a HTTPMsg
+object called "main" and a list of Resource objects. The meaning is
+that the main HTTPMsg represent the object that contains the resources
+in the list as subresources. For example, the main HTTPMsg could be a
+HTML file and the subresources could be images referenced from the
+HTML file.
+
+When a page is considered to be finished by HTTPUser we have the
+following call chain:
+
+HTTPUser::consumeResource ->
+    PageViewPrinterTab::printPageView
+        Page and request information are written to log files.
+
+    If the resource is "lonely", meaning that it doesn't have any
+    subresources and it is not of content-type text/html or
+    application/xhtml+xml then the following method is called instead:
+
+    PageViewPrinterTab::printLonelyResource
+        Page and request information are written to log files.
+

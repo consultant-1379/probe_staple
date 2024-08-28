@@ -1,0 +1,264 @@
+Long page download times
+------------------------
+
+In some cases the tool will report a very long page download time (>>
+60s). This happens when a .html file takes a very long time to
+download. The .html may reference other resources (images,
+stylesheets, etc) so one may get a page with a very long download time
+with more than 1 resource.
+
+Resources are not processed by HTTPUser::associateWithPageView until
+they are completely downloaded (successfully or not), so the initial
+.html will not be processed until x s after the request (for some
+large x >> 60s).
+
+If the subresources are also very slow then they will also not be
+processed until later.
+
+If the subresources are fast in comparision to the initial .html, then
+they should time out instead of being added as subresources.
+
+dumps/laget-filter.pcap at telia contains an example of a page with
+large download time and more than one subresource.
+
+TODO
+----
+
+* Ignore CONNECT requests.
+
+* Strip :80 from Host HTTP header? Seen in requests to
+  flscontrol.com:80.
+
+* Advance seq no and give empty packet to HTTPMsg instead of dropping
+  connection with 'Too much packet drop/reordering'.
+
+* Log RTT.
+
+* Compute maximum UE DL throughput. (A first approximation is to take
+  the maximum of all response throughputs. Response size divided by
+  duration from first response packet to last response packet. More
+  sophisticated measurement would take multiple parallell TCP sessions
+  into account.) Is that throughput correlated with
+  page load time?
+
+  Already done by TCP code in staple?
+
+* Run with -n 2 for some time in DNA network (to get
+  HTTP_LOG_LEVEL_WARN messages).
+
+* To test if the grouping of resources to pages is reasonable one can
+  look at the most popular URLs (say 100 most popular) in some
+  dataset, e.g., the SNP data. Store all info about all subresources
+  and how they are related. Then, let firefox or chrome visit these
+  addresses and record downloads with firebug or a similar tool. Also
+  store packet dumps. Finally, compare the dumps/firebug output with
+  the ones we got from the real data. Important to only test popular
+  URLs due to privacy issues! Make sure that URLs that are only
+  visited by a few clients _aren't_ tested!
+
+* Count number of packets that don't belong to any TCP session.
+
+* Should we have separate statistics for cached (say at least one
+  resource cached) and non-cached pageviews? The spread of DLT CDFs
+  will decrease.
+
+* It may be interesting to compare RTT vs. download time and
+  Throughput vs. download time graphs.
+
+* Add test: Goto page and then click on link to other page after
+  first page have finished loading but before
+  3s. chrome-dn.se-sen-dn.se-sthlm almost accomplishes this (it is
+  slightly more than 3s though) But it worked OK without the 3s
+  timeout.
+
+* Do content base MIME type sniffing on compressed content as well? 
+  Need to decompress the first few byte of the response but that
+  shouldn't be too bad.
+
+* How to detect IFRAMEs?
+
+   The problem: The user looks at a.html. a.html contains some images
+   b.png and c.png. It also contains an IFRAME d.html.
+
+   The problem is that d.html will have a.html as referer in two
+   different cases:
+
+   1. d.html is an IFRAME of a.html
+   2. The user clicks on a link in a.html to d.html.
+
+   We want to distinguish the two cases.
+
+ IFRAME characteristics:
+
+ + If b.html refers to a.html and the TCP connections where a.html was
+    downloaded was closed by RST, then b.html is probably not an
+    IFRAME. (The RST indicates that the user clicked on a link before
+    a.html was fully loaded.) Or, more generally, if a TCP session on
+    which some object contained in a.html was downloaded is closed by
+    RST, then b.html probably isn't an IFRAME.
+
+ + IFRAMEs are typically small.
+ + IFRAMEs are typically not from the same domain(?)
+ + Look for IFRAME in text/html responses. If found, parse SRC and
+   store somewhere. (Fails for IFRAMEs inserted by javascript.)
+
+ + Look for A in text/html responses. If found, parse HREF and store
+   somewhere. If we later see text/html with macthing URI we know that
+   it's _not_ an IFRAME.
+
+ + IFRAMEs are typically loaded fairly soon after the main page was
+   loaded.
+
+ + IFRAMEs do typically not use transfer-encoding chunked(?) (They are
+   small and typically static(?)) Other test/html pages are large and
+   typically not static and thus more often use chunked(?)
+
+ + IFRAMEs are typically not the last resource loaded from a page. (This
+   method will fail if the user clicks on a link and opens a new tab
+   before all images have been downloaded.)
+
+   If there are several IFRAMEs d2.html, d3.html, d4.html in
+   a.html. What happens then? Can we use a similar technique? One
+   problem here is if the user clicks on several links and opens new
+   tabs for them.
+
+ Maybe compute some score based on this and the patterns. If the
+ score is high enough, then we consider it as an IFRAME.
+
+ Can we use machine learning to detect IFRAMEs? An IFRAME classifier!
+
+ + aftonbladet.se has lots of IFRAMEs.
+
+* Add first TCP SYN timestamp in first HTTPMsg of a connection.
+
+* When outputting HTTPPageViews:
+
+  + Write DL and UL throughput.
+
+  + PDF for page view download time.
+
+  + Time/size scatter plot? Time/#requests scatter plot? Write #users,
+    #requests, and #connections.
+
+* Detect pipelining?
+
+* Add time for first packet and time when last packet was acked.
+
+* Use tc qdisc on both server and client to get more interesting
+  drop/reorder/retransmission scenarios.
+
+* Add test with HTTP header that spans more than one line. E.g.,
+
+GET / HTTP/1.0
+X-Foo: abc
+    def
+
+
+This is allowed by the HTTP RFC.
+
+* Add test with HTTP request with only LF instead of CRLF and mixed
+  SP/HT instead of only one SP.
+
+E.g.,
+
+GET	/ 	HTTP/1.0 (only LF here)
+
+Clients and servers should support this according the HTTP RFC, see
+section 19.3.
+
+Can be fixed by skipping SP and HT in skipSpace. Add SkipOneCRLF to
+skip optional CR then LF. Also change findCRLF.
+
+
+* To distinguish content downloaded with javascript (e.g., google
+  suggest) after action from
+  user the relative timings can be investigated. The browser will
+  first download everything that is needed to display the page, HTML,
+  javascript, images, etc. After that there will probably be a gap in
+  time before the user does something (e.g., clicks on button or
+  writes something.).
+
+  Use 
+
+tshark -Tfields -e frame.time_relative -e frame.time_delta_displayed
+-e http.host -e http.referer -e http.request.uri -r
+google.se-uncached.pcap  -R http.request
+
+  on captures/google.se-search.pcap and
+  captures/google.se-uncached.pcap to investigate.
+
+
+  Can techniques used in change detection in signal processing be
+  useful here? Can we learn from history? Machine learning?
+
+* One use of the tool can be to estimate the effect of a (transparent)
+  HTTP proxy in the network.
+
+* To deal with completely cached objects (i.e., not even a GET with
+  If-modified-since or similar header is sent) we really need patterns.
+
+* Resource patterns.
+
+  To properly detect IFRAME and FRAME one can use an idea from Ete and
+  ksniffer. See HTTPPageView.cc for a problem description.
+
+  For each URL containing text/html we store a double totalCount and a
+  map from URL to count.
+
+  Whenever we see a request for some URL a.html and a b.html with
+  referer a.html we lookup b.html in the map associated with
+  a.html. If it is there
+  and totalCount/count > 0.8 (exact number TBD), then guess that
+  b.html is an FRAME or IFRAME in a.html.
+
+  Also update the totalCount and count as follows:
+
+  count = 0.99 * count + 1
+
+  When we have decided that the download of a.html is finished we
+  update all other counts in the map as follows:
+
+  count = 0.99 * count
+
+  and set totalCount = 0.99 * totalCount + 1.
+
+  If totalCount/count < 0.01, remove that entry from the map.
+
+  If b.html doesn't exist in the map we set count = (0.8 - 0.1) * totalCount.
+
+  This means that we will need atmost ~10 page visits that downloads
+  b.html with a.html as referer before we consider b.html as a FRAME
+  in a.html. The factor 0.99 is a forgetting factor. After sometime we
+  will forget that we have seen certain pages (if a.html is changed
+  and no longer uses b.html as a FRAME). 
+
+  Simpler approach: Increase by one if a subresource is contained in
+  the page view, decrease by one if it is not. When the count reaches
+  zero we remove the subresource from the pattern. Subresources that
+  disappear will be removed as we forget stuff over time.
+
+
+* Add test with one successful request/response and then bogus
+  data. Check that we keep the connection but don't add more data to
+  it. It should end up in abortedConnections.
+
+* Log unknown request methods.
+
+* C++ style guide:
+  http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml
+
+* cpplint.py tool to check C++
+  code. http://google-styleguide.googlecode.com/svn/trunk/cpplint/cpplint.py
+
+* 100 Continue should be ignored, new HTTPMsg shall not be created.
+
+* Keep statistics over rspStatusCode and reqMethods.
+
+* Possible application: make a graph, nodes are URLs, arrows represent
+  that a user goes from one URL to the next. Thickness can represent
+  number of clicks. Maybe it is possible to create a movie to see
+  changes over time with some tool?
+
+* Waterfall charts as output?
+
+* Add test with TCPPLLen != payloadSavedLen.

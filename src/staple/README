@@ -1,0 +1,448 @@
+Libstaple and the StapleAPI object
+==================================
+
+Libstaple provides the core functionality of Staple -- a TCP performance
+evaluation tool. It works on IP packet streams, and logs performance
+statistics for each TCP and FLV flow. It also logs HTTP pages and HTTP
+requests.
+
+Glossary
+--------
+
+TCP transaction
+  A TCP connection can be broken down into TCP transactions. A TCP transaction
+  is a time period where the TCP sender actively transmits data (more
+  precisely, the TCP socket send buffer is not empty). Typically, a TCP
+  connection from e.g., a web server sending several responses and web objects
+  is broken down to several TCP transactions accodring to the different
+  objects sent.
+
+Channel rate
+  The channel rate estimatation tries to calculate the bottleneck link
+  capacity on a path of a TCP connection. The calculation is done for time
+  periods where the TCP sender sends enough data to saturate the bottleneck
+  link.
+
+Usage
+-----
+
+Libstaple is provided as a shared library ``libstaple.so`` and a header file
+``StapleAPI.h``. User code is expected to create an instance of class
+*StapleAPI*, and pass consecutive packets to it through the
+``StapleAPI::parsePacket()`` interface.
+
+User code
+~~~~~~~~~
+
+An example pseudocode snippet::
+
+  #include "StapleAPI.h"
+  ...
+  StapleAPI staple;
+  staple.config("key1=val1; key2=val2;..."); /* See Configuration below */
+  ...
+  while( read packets )
+    staple.parsePacket(
+      pointer to IP payload,
+      length of IP frame,
+      timestamp of packet,
+      is packet downlink?
+    );
+
+Compilation and linking
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Link to ``libstaple.so``::
+
+  c++ yourfile.cc -o yourbinary -Ldir_to_libstaple -lstaple
+
+Autoconf support
+~~~~~~~~~~~~~~~~
+
+If you are creating your own autoconf setup, an M4 macro file ``staple.m4``
+provided with the libstaple distribution might come in handy. In this case add
+something along the following to your ``configure.ac``::
+
+  AX_STAPLE
+  AM_CONDITIONAL([LIBSTAPLE], [test x"$LIBSTAPLE_LDFLAGS" != x])
+
+and this to your ``Makefile.am``::
+
+  AM_CPPFLAGS += $(LIBSTAPLE_CPPFLAGS)
+  AM_LDFLAGS  += $(LIBSTAPLE_LDFLAGS)
+
+Output
+------
+
+Libstaple emits information per flow for TCP and FLV and information
+per page and request for HTTP into output streams that can be set
+with::
+
+  StapleAPI staple;
+  staple.TCPTAlog(std::ostream * tcplog); /* eg, a std::fstream */
+  staple.FLVlog(std::ostream * flvlog);
+  staple.HTTPPageLog(std::ostream * pagelog);
+  staple.HTTPRequestLog(std::ostream * requestlog);
+
+Note that all streams are initialized to NULL that means no logging
+whatsoever as the default.
+
+TCP transaction file format
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+TCP transaction log files contain the following TAB-separated fields on each line:
+
+===  ===================  ==================  ========
+No   Field name           Data type or units  Comments
+===  ===================  ==================  ========
+1    start time           seconds             UNIX timestamp (seconds since
+                                              Epoch)
+2    duration             seconds
+3    source IP address    dotted quad
+4    source port          integer
+5    destination IP       dotted quad
+     address
+6    destination port     integer
+7    direction            0 (zero) or 1       0 is uplink, 1 is downlink
+8    data received        bytes               TCP payload (without IP and
+                                              other headers)
+9    througphut           bits per second     TCP payload-level throughput
+10   session throughput   bits per second     IP-level throughput (including
+                                              parallel IP traffic of the same
+                                              subscriber)
+11   session throughput   bits per second     IP-level throughput excluding the
+     without slowstart                        TCP slow start phase (including
+                                              parallel IP traffic of the same
+                                              subscriber)
+12   channel rate         bits per second     estimated link capacity
+13   alone ratio          float               parallel bytes/this TCP bytes
+                                              (e.g, 0: no parallel traffic
+                                              during the TCP; 2: parallel
+                                              traffic was twice as much as this
+                                              TCP's bytes)
+14   max receiver window  bytes
+15   initial RTT          seconds             round-trip time measured between
+     (terminal side)                          the measurement point and the
+                                              terminal during TCP connection
+                                              setup (only present if there was
+                                              no significant parallel traffic)
+16   initial RTT          seconds             round-trip time measured between
+     (network side)                           the measurement point and the
+                                              internet host during TCP
+                                              connection setup (only present if
+                                              there was no significant parallel
+                                              traffic)
+17   max packet size      bytes
+18   packet loss ratio    float               estimated packet loss ratio
+     (terminal side)                          between the measurement point and
+                                              the terminal
+19   packet loss ratio    float               estimated packet loss ratio
+     (network side)                           between the measurement point and
+                                              the internet host
+20   content type         string              HTTP content type / BitTorrent
+                                              detection (only if TCP flow was
+                                              part of an HTTP / BitTorrent
+                                              transfer)
+21   host name            string              HTTP host name (only if TCP flow
+                                              was part of an HTTP transfer)
+22   uri extension        string              last part of the HTTP URI (only
+                                              if TCP flow was part of an HTTP
+                                              transfer) E.g. "html", "mp3" or
+                                              "flv"
+===  ===================  ==================  ========
+
+Example record::
+  
+  1228526610.288438	1.840616	10.139.253.232	50116	72.14.207.176	80	1	229160	1034436.297413	1112614.472546	1953385.871194	\N	0.075576	65535
+  \N	0.003405	1400	0.000000	0.000000	video/3gpp	vp.video.google.com:80	\N
+
+FLV performance file format
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+FLV log files contain the following TAB-separated fields on each line:
+
+===  ===================  ==================  ========
+No   Field name           Data type or units  Comments
+===  ===================  ==================  ========
+1    start time           seconds             UNIX timestamp (seconds since
+                                              Epoch)
+2    duration             seconds             transport duration: the timestamp
+                                              difference of the last and first
+                                              TCP data packet corresponding to
+                                              the video stream
+3    source IP address    dotted quad
+4    source port          integer
+5    destination IP       dotted quad
+     address
+6    destination port     integer
+7    media bytes          integer             incl. video + audio + flv headers
+8    video rate           bits per second     video only
+9    transport rate       bits per second     transfer rate of media (incl. video + audio + flv headers)
+10   initial buffering    seconds             estimated time difference between
+     time                                     the user click and the display of
+                                              the first frame
+11   rebuffering events   integer             total number of media 'freezes'
+12   rebuffering duration seconds             total duration of media 'freezes'
+13   termination          string              TCP termination: 'OK','TO','RST'
+14   video codec          string
+15   audio codec          string
+16   audio sampling rate  KHz
+17   audio channels       string              'mono' or 'stereo'
+18   direction            0 (zero) or 1       0 is uplink, 1 is downlink
+19   alone ratio          float               parallel bytes/this TCP bytes
+                                              (e.g, 0: no parallel traffic
+                                              during the TCP; 2: parallel
+                                              traffic was twice as much as this
+                                              TCP's bytes)
+20   max receiver window  bytes
+21   initial RTT          seconds             round-trip time measured between
+     (terminal side)                          the measurement point and the
+                                              terminal during TCP connection
+                                              setup (only present if there was
+                                              no significant parallel traffic)
+22   initial RTT          seconds             round-trip time measured between
+     (network side)                           the measurement point and the
+                                              internet host during TCP
+                                              connection setup (only present if
+                                              there was no significant parallel
+                                              traffic)
+23   max packet size      bytes
+24   packet loss ratio    float               estimated packet loss ratio
+     (terminal side)                          between the measurement point and
+                                              the terminal
+25   packet loss ratio    float               estimated packet loss ratio
+     (network side)                           between the measurement point and
+                                              the internet host
+26   30s MOS values       list of float       list of MOS values calculated for
+                                              30s timeslots
+27   average MOS          float               session average MOS
+28   average MOS          float               session average MOS excluding the
+     without first 30s                        first 30s (because of the
+                                              distorting effect of initial
+                                              buffering)
+29   MOS number           integer             number of 30s MOS reports
+30   MOS timestamps       list of float       list of transport timestamps
+                                              when the 30s MOS reports were
+                                              calculated (pointing to the
+                                              beginning to the 30s period)
+31   MOS durations        list of float       transport duration of the 30s
+                                              MOS periods
+
+Example record::
+  1321109289.387670       1.960561        178.55.178.189  49410   213.186.229.37  80      790498  22786.561166    3225599.203493  0.072282
+  0       0.000000        TO      Sorenson H.263  \N      \N      \N      1       8.658951        261800  \N      0.006682        1440
+  \N      \N      {1.207943,1.263028,1.264644,1.269957,1.256816,1.252043,1.253498,1.251072}       1.252375        1.258723        8
+  {0.000000,0.504773,0.768597,0.966566,1.176176,1.366249,1.543964,1.762054}       {0.504773,0.263824,0.197969,0.209610,0.190073,0.177715,0.218090,0.198507}
+
+HTTP page file format
+~~~~~~~~~~~~~~~~~~~~~
+
+The HTTP page log files contain one row per HTTP page (one page
+typically consist of a number of HTML files, Javascript files, images,
+and stylesheets). Strings in the log file are escaped in a way so that
+the PostgreSQL COPY command can use them without modification. In
+particular, the following replacements have been made:
+
+\                       -> \\
+tab                     -> \t
+line feed               -> \n
+carriage return         -> \r
+non-printable character -> \xZZ, where ZZ is the hexadecimal value of the character
+
+Each line contains the following TAB-separated fields:
+
+===  ===================  ==================  ========
+No   Field name           Data type or units  Comments
+===  ===================  ==================  ========
+
+1    start time           seconds             UNIX timestamp (seconds since
+                                              Epoch)
+2    server host          string              Server host name from the HTTP
+                                              Host header.
+3    client IP address    dotted quad
+4    download time        seconds             Time from first request packet
+                                              containing data to last response
+                                              packet containing data.
+5    number of resources  integer             Number of resources contained in
+                                              this page.
+6    number of cached     integer             Number of requests sent from the
+     resources                                user agent which got a response
+                                              back from the server with status
+                                              code 304 "Not Modified".
+7    bytes network UL     integer             Number of TCP payload bytes sent
+                                              in the uplink, including HTTP
+                                              headers.
+8    bytes network DL     integer             Number of TCP payload bytes sent
+                                              in the downlink, including HTTP
+                                              headers.
+9    URL                  string              First 100 bytes of request URL.
+                                              Currently only file extension and
+                                              some youtube URLs are logged to
+                                              save disk space.
+10   referrer             string              First 100 bytes of HTTP the
+                                              referrer header. Currently empty
+                                              to reduce logging overhead.
+11   user-agent           string              The HTTP User-Agent header.
+                                              Currently empty to reduce logging
+                                              overhead.
+12   page ID              integer             Each page has a unique ID. Can be
+                                              used to correlate the page logs
+                                              with the request logs.
+13   complete response    boolean (0/1)       A page is considered to be
+                                              successfully downloaded if all
+                                              resources the page contains were
+                                              successfully downloaded. A
+                                              resource is successfully
+                                              downloaded if the whole response
+                                              was seen in the packet dump and
+                                              the response status code was 2xx
+                                              or 3xx.
+14   access time          seconds             Time from first request packet
+                                              containing data to first response
+                                              packet containing data.
+
+Example record::
+1315076119.311750	lwn.net	192.168.0.18	1.614974	23	4	16903	149086				1	1	0.206577
+
+
+HTTP request file format
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The HTTP request log files contain one row per HTTP request (there can
+be more than one request per TCP session). Strings are encoded in the
+same way as in the HTTP page log files. Each line contains the
+following TAB-separated fields:
+
+===  ===================  ==================  ========
+No   Field name           Data type or units  Comments
+===  ===================  ==================  ========
+
+1    start time           seconds             UNIX timestamp (seconds since
+                                              Epoch)
+2    page ID              integer             All resources belonging to the
+                                              same page have the same Page ID.
+3    depth                integer             The depth at which this resource
+                                              is at in the tree of resources
+                                              that the page consists of.
+4    server host          string              Server host name from the HTTP
+                                              Host header.
+5    server IP address    dotted quad
+6    server port          integer             Server side TCP port number.
+7    client IP address    dotted quad
+8    client port          integer             Client side TCP port number.
+9    server processing    seconds             Time from the first request
+     time                                     packet to the first response
+                                              packet.
+10   download time        seconds             Time from first request packet
+                                              containing data to last response
+                                              packet containing data.
+11   bytes network UL     integer             Number of TCP payload bytes sent
+                                              in the uplink, including HTTP
+                                              headers.
+12   bytes network DL     integer             Number of TCP payload bytes sent
+                                              in the downlink, including HTTP
+                                              headers.
+13   HTTP request method  string
+14   URL                  string              First 100 bytes of request URL.
+                                              Currently only file extension and
+                                              some youtube URLs are logged to
+                                              save disk space.
+15   response status code integer             0 if the status code was not
+                                              successfully parsed.
+16   request success      boolean (0/1)       A resource is successfully
+                                              downloaded if the whole response
+                                              was seen in the packet dump and
+                                              the response status code was 2xx
+                                              or 3xx.
+17   content-type         string              Based on Content-Type HTTP
+                                              header and/or sniffed from
+                                              response data.
+18   referrer             string              First 100 bytes of the referrer
+                                              HTTP header. Currently empty
+                                              to reduce logging overhead.
+19   user-agent           string              User-Agent HTTP header. Currently
+                                              empty to reduce logging overhead.
+20   req. cache-control   string              Cache-Control HTTP header from
+                                              request. Currently empty
+                                              to reduce logging overhead.
+21   rsp. cache-control   string              Cache-Control HTTP header from
+                                              response. Currently empty
+                                              to reduce logging overhead.
+22   content-encoding     string              Content-Encoding HTTP header.
+
+Example record::
+1	1	1315076119.762163	lwn.net	72.51.34.34	80	192.168.0.18	37052	0.193248	0.580696	485	13480	GET	/images/lcorner.png	200	1	image/png	http://lwn.net/	Mozilla/5.0 (X11; Linux i686; rv:6.0) Gecko/20100101 Firefox/6.0			identity
+
+
+Configuration options
+---------------------
+
+Some elements of the run-time behavior of StapleAPI are configured
+through a call to ``StapleAPI::config()``::
+
+  StapleAPI staple;
+  staple.config("key1 = value1; key2 = value2; ...");
+
+Supported keys along with default and/or possible values are as follows.
+
+byteOrder
+  Host CPU byte order
+  0: big endian (e.g., Motorola, Sparc)
+  1: little endian (e.g., Intel)
+  Default: autodetect
+
+tcpSSBytes
+  Amount of data after which TCP slow start is assumed finished. [bytes]
+  Default: 75000
+
+tcpSSFlightSize
+  Flight size above which TCP slow start is assumed finished. [bytes]
+  Default: 30000
+
+tcpMinSize
+  Minimum size of a TCP transaction that appears in the log. [bytes]
+  Flows less than this are not logged. Default: 100000
+
+tcpCRMinPipe
+  Estimated max(bandwidth x propagation delay) product of the monitoring
+  point - endhost/terminal path in bytes. This is used by the channel rate
+  calculation algorithm to detect time periods when the path is fully saturated
+  by TCP (i.e., TCP's send window size is larger than the bandwidth x delay
+  product). This value is dependent on the network technology (2G, 3G, LTE,
+  DSL, ...), and if its value is too low, the channel rate will be
+  underestimated. Typical values:
+  HSPA ~50000 bytes (8 Mbps x 50ms)
+  LTE ~200000 bytes (80 Mbps x 20ms)
+  Default: 50000
+
+tcpCRMinTime
+  Minimum duration a channel rate calculation period [seconds]. Used together
+  with *tcpCRMinBytes* parameter for determining whether a channel rate
+  calculation can be made (with an OR rule). 
+  Default: 10000 (i.e., use the tcpCRMinBytes parameter instead)
+
+tcpCRMinBytes
+  Minimum amount of IP data for which a channel rate calculation will be made.
+  [bytes]. Used together with *tcpCRMinTime* parameter for determining whether
+  a channel rate calculation can be made (with an OR rule).
+  Default: 250000
+
+tcpACKComprTime
+  TCP ACKs arriving closer than this timeout are considered compressed and
+  are not considered for round trip time calculation. [seconds]
+  This parameter is access technology dependent. Typical values:
+  HSPA 0.001 s
+  LTE 0.0001 s
+  Default: 0.0001
+
+tcpRTTMaxBefore
+  Maximum amount of UL/DL IP session data for the same terminal IP address
+  that may be sent *before* a TCP SYN during the last 1s so that the TCP
+  setup is still considered unloaded. [bytes]
+  Default: 1000
+
+tcpRTTMaxDuring
+  Maximum amount of UL/DL IP session data for the same terminal IP address
+  that may be sent *during* a TCP SYN--SYN/ACK--ACK handshake so that the TCP
+  setup is still considered unloaded. [bytes]
+  Default: 2000

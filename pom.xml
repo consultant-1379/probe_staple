@@ -1,0 +1,154 @@
+<?xml version="1.0"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>probe_binary</groupId>
+  <artifactId>ERICstaple-CXC1734186</artifactId>
+  <version>1.0.1</version>
+  <packaging>rpm</packaging>
+  <name>PCP Staple - RPM</name>
+  <description>The Staple RPM.
+Staple takes an input and processes the throughput parameters of network packets.</description>
+  <url>http://maven.apache.org</url>
+  <properties>
+  	<lib.dir>/opt/ericsson/lib</lib.dir>
+	<install.dir>/opt/ericsson/staple</install.dir>
+	<name>PCP Staple - RPM </name>
+    	<versioned.install.dir>${install.dir}/staple-${project.version}</versioned.install.dir>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <copyright>2012 Ericsson AB All rights reserved</copyright>
+        <url>www.ericsson.com</url>
+        <vendor>Ericsson</vendor>
+        <packager>LMI Ericsson</packager>
+  </properties>
+  <build>
+    <plugins>
+    <!--
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>1.2.1</version>
+        <executions>
+          <execution>
+            <id>make-clean</id>
+            <phase>clean</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <executable>make</executable>
+              <arguments>
+                <argument>clean</argument>
+              </arguments>
+              <workingDirectory>src/</workingDirectory>
+            </configuration>
+          </execution>
+          <execution>
+            <id>make-compile</id>
+            <phase>compile</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <executable>make</executable>
+              <workingDirectory>src/</workingDirectory>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>rpm-maven-plugin</artifactId>
+        <version>2.1-alpha-1</version>
+        <extensions>true</extensions>
+        <executions>
+          <execution>
+            <goals>
+              <goal>rpm</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <requires>
+            <require>zlib%{?_isa} &gt;= 1.2.3</require>
+            <require>libstdc++%{?_isa} &gt;= 4.4.6</require>
+            <require>glibc%{?_isa} &gt;= 2.12</require>
+          </requires>
+          <name>ERICstaple-CXC1734186</name>
+          <copyright>comercial</copyright>
+          <group>Application/Collectors</group>
+          <needarch>x86_64</needarch>
+          <prefix>${versioned.install.dir}</prefix>
+          <release>${rstate}</release>
+          <mappings>
+             <mapping>
+              <directory>${install.dir}</directory>
+              <filemode>700</filemode>
+              <username>pcpuser</username>
+              <groupname>dc5000</groupname>
+            </mapping>
+            <mapping>
+              <directory>${versioned.install.dir}</directory>
+              <filemode>700</filemode>
+              <username>pcpuser</username>
+              <groupname>dc5000</groupname>
+            </mapping>
+            <mapping>
+              <directory>${versioned.install.dir}/bin</directory>
+              <filemode>700</filemode>
+              <username>pcpuser</username>
+              <groupname>dc5000</groupname>
+              <sources>
+                <source>
+                  <location>compiled_code/bin/</location>
+                </source>
+              </sources>
+            </mapping>
+            <mapping>
+              <directory>${lib.dir}</directory>
+              <documentation>true</documentation>
+              <filemode>700</filemode>
+              <username>pcpuser</username>
+              <groupname>dc5000</groupname>
+              <sources>
+                <source>
+                  <location>compiled_code/lib/</location>
+                </source>
+              </sources>
+            </mapping>
+          </mappings>
+          <preinstallScriptlet>
+            <script>echo "installing ERICstaple component now"
+            
+            	# check if pcpuser and dcuser exist. if not the installation will end.
+
+		if_user_exist()
+		{
+		if [ -z "$(getent passwd $1)" ] ; then
+			echo "user $1 does not exist, installation will be aborted"
+			exit 1
+		else
+			echo "checking user $1. Done."
+		fi
+		}
+
+		if_user_exist pcpuser
+            </script>
+          </preinstallScriptlet>
+	<postinstallScriptlet>
+           <script>
+                # Check if a soft link for latest version of probe-controller already exists
+		if [ -L "/opt/ericsson/staple/staple" ]; then
+			rm /opt/ericsson/staple/staple
+		fi
+		
+		ln -s  ${versioned.install.dir} /opt/ericsson/staple/staple 
+                 </script>
+        </postinstallScriptlet>
+        	
+	
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
